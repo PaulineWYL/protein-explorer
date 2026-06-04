@@ -146,9 +146,6 @@ function switchSheet(sheetName) {
     
     // 建立圖表
     renderCharts(sheetName, data);
-    
-    // 顯示檔案資訊
-    renderInfo(sheet, data);
 }
 
 // 渲染表格
@@ -160,7 +157,7 @@ function renderTable(sheetName, data) {
         tables[sheetName].destroy();
     }
     
-    tableContainer.innerHTML = '<div id="tabulator-' + sheetName + '" style="margin-top: 20px;"></div>';
+    tableContainer.innerHTML = '<div id="tabulator-' + sanitizeId(sheetName) + '" style="margin-top: 20px;"></div>';
     
     // 準備欄位定義
     const columns = Object.keys(data[0]).map(key => ({
@@ -172,7 +169,7 @@ function renderTable(sheetName, data) {
     }));
     
     // 建立 Tabulator 表格
-    tables[sheetName] = new Tabulator('#tabulator-' + sheetName, {
+    tables[sheetName] = new Tabulator('#tabulator-' + sanitizeId(sheetName), {
         data: data,
         columns: columns,
         layout: 'fitDataFill',
@@ -398,6 +395,11 @@ function buildChartConfigPanel(data) {
     } else {
         panel.style.display = 'none';
     }
+}
+
+// 將工作表名稱轉換為有效的 HTML ID
+function sanitizeId(str) {
+    return str.replace(/[^a-zA-Z0-9-_]/g, '_');
 }
 
 function isNumericColumn(data, col) {
