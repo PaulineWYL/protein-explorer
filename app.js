@@ -1,11 +1,24 @@
-let currentWorkbook = null;
+﻿let currentWorkbook = null;
 let tables = {};
 let charts = {};
 let currentSheetData = [];
 let currentSheetName = '';
 let chartConfig = { xAxis: '', yAxis: '' };
 let sheetDataMap = {};
+let detailTable = null;
 const compareSheets = ['MAD', 'MADEV', 'MADEVNP'];
+const noCollapseSheets = ['樞紐', '總表'];
+
+// 各 Sheet 的表頭行配置
+const sheetHeaderConfig = {
+    'Description of Column Title': [3, 20],  // row 3 & row 20（0-indexed: 2, 19）
+    '樞紐': 4,                               // row 4（0-indexed: 3）
+    'MAD': 1,                                 // row 1（0-indexed: 0）
+    'MADEV': 1,
+    'MADEVNP': 1
+    // 其他 sheet 使用自動檢測
+};
+
 
 // 初始化拖曳上傳
 const uploadArea = document.getElementById('uploadArea');
@@ -118,28 +131,82 @@ function initializeSheetSelector() {
 // 切換工作表
 function switchSheet(sheetName) {
     const sheet = currentWorkbook.Sheets[sheetName];
-    let data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
     
-    // 清理數據：將 'EMPTY' 字符串和其他可能的空值表示轉換為空字符串
-    data = data.map(row => {
-        const cleanedRow = {};
-        for (const [key, value] of Object.entries(row)) {
-            if (value === 'EMPTY' || value === null || value === undefined) {
-                cleanedRow[key] = '';
-            } else {
-                cleanedRow[key] = value;
-            }
-        }
-        return cleanedRow;
-    });
+    // 取得原始數據（包含所有行）
+    const rawData = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
     
-    if (data.length === 0) {
+    if (rawData.length === 0) {
         showError('該工作表沒有資料');
         return;
     }
     
+    // 取得該 sheet 的表頭配置
+    const headerConfig = sheetHeaderConfig[sheetName];
+    let headerRowIndices = [];
+    
+    if (headerConfig !== undefined) {
+        // 使用指定的表頭行
+        if (Array.isArray(headerConfig)) {
+            headerRowIndices = headerConfig.map(row => row - 1);  // 轉換為 0-indexed
+        } else {
+            headerRowIndices = [headerConfig - 1];  // 轉換為 0-indexed
+        }
+    } else {
+        // 自動檢測表頭行
+        const detected = detectHeaderRow(rawData);
+        headerRowIndices = [detected];
+    }
+    
+    // 驗證表頭行有效性
+    headerRowIndices = headerRowIndices.filter(idx => idx >= 0 && idx < rawData.length - 1);
+    
+    if (headerRowIndices.length === 0) {
+        showError('無法偵測表頭行');
+        return;
+    }
+    
+    // 使用第一個表頭行作為列名
+    const headerRowIndex = headerRowIndices[0];
+    const columnNames = rawData[headerRowIndex].map((val, idx) => {
+        const name = String(val || '').trim();
+        return name === '' || name === 'EMPTY' ? `Column ${idx + 1}` : name;
+    });
+    
+    // 提取數據行（第一個表頭行之後的所有行，排除其他表頭行）
+    let data = rawData.slice(headerRowIndex + 1).map((row, originalIdx) => {
+        const obj = {};
+        const indentLevel = detectIndentLevel(row);  // 檢測縮排層級
+        
+        columnNames.forEach((colName, idx) => {
+            const value = row[idx];
+            if (value === 'EMPTY' || value === null || value === undefined) {
+                obj[colName] = '';
+            } else {
+                // 確保數值被正確保存為字符串
+                obj[colName] = String(value).trim();
+            }
+        });
+        
+        // 添加內部縮排層級標記（用於行分組）
+        obj._indentLevel = indentLevel;
+        obj._isSubHeader = isSubHeader(rawData, headerRowIndex + 1 + originalIdx);
+        
+        return obj;
+    });
+    
+    // 移除其他表頭行和空行
+    data = data.filter(row => !isHeaderRow(row, columnNames) && Object.values(row).some(v => v !== '' && !v.toString().startsWith('_')));
+    
+    if (data.length === 0) {
+        showError('該工作表沒有有效資料');
+        return;
+    }
+    
+    // 顯示原始 Excel 表格
+    renderRawSheet(sheet);
+    
     // 建立表格
-    renderTable(sheetName, data);
+    renderTable(sheetName, data, columnNames);
     
     // 建立統計數據
     renderStats(data);
@@ -148,59 +215,350 @@ function switchSheet(sheetName) {
     renderCharts(sheetName, data);
 }
 
-// 渲染表格
-function renderTable(sheetName, data) {
-    const tableContainer = document.getElementById('table');
+// 檢測縮排層級（基於第一欄是否為空）
+function detectIndentLevel(row) {
+    // 檢查前 3 欄是否為空來判斷縮排層級
+    for (let i = 0; i < Math.min(1, row.length); i++) {
+        const val = String(row[i] || '').trim();
+        if (val !== '') {
+            return 0;  // 非縮排
+        }
+    }
+    return 1;  // 縮排層級 1
+}
+
+// 檢測是否為子表頭（當前 A 欄為空，上一欄 A 有值）
+function isSubHeader(rawData, rowIndex) {
+    if (rowIndex <= 0) return false;
     
-    // 如果已存在表格，銷毀舊表格
+    const currentRowFirstCol = String(rawData[rowIndex][0] || '').trim();
+    const prevRowFirstCol = String(rawData[rowIndex - 1][0] || '').trim();
+    
+    // 當前欄 A 空，上一欄 A 有值 = 子表頭
+    return currentRowFirstCol === '' && prevRowFirstCol !== '';
+}
+
+// 智能檢測表頭行位置
+function detectHeaderRow(rawData) {
+    // 找到第一個有最多非空值的行作為表頭
+    let maxNonEmptyCount = 0;
+    let headerIndex = 0;
+    
+    for (let i = 0; i < Math.min(5, rawData.length); i++) {
+        const nonEmptyCount = rawData[i].filter(val => val !== '' && val !== null && val !== undefined).length;
+        if (nonEmptyCount > maxNonEmptyCount) {
+            maxNonEmptyCount = nonEmptyCount;
+            headerIndex = i;
+        }
+    }
+    
+    return headerIndex;
+}
+
+// 檢查是否為列名行（整列都是欄位名稱）
+function isHeaderRow(row, columnNames) {
+    const values = Object.values(row).filter(v => !v.toString().startsWith('_')).map(v => String(v).trim());
+    const matchCount = values.filter(v => v !== '' && columnNames.includes(v)).length;
+    // 如果匹配的值超過該行70%以上，視為列名行
+    return values.length > 0 && matchCount / values.length > 0.7;
+}
+
+// 渲染表格
+function renderTable(sheetName, data, columnNames) {
+    const tableContainer = document.getElementById('table');
+
     if (tables[sheetName]) {
         tables[sheetName].destroy();
     }
-    
+    closeDetailModal();
+
     const tableId = 'tabulator-' + sanitizeId(sheetName);
-    tableContainer.innerHTML = `<div id="${tableId}" style="margin-top: 20px;"></div>`;
+    tableContainer.innerHTML = `<div id="${tableId}" class="table-wrapper"></div>`;
     const tableElement = document.getElementById(tableId);
     if (!tableElement) {
         showError('無法建立表格，請重新整理頁面。');
         return;
     }
-    
-    // 準備欄位定義
-    const columns = Object.keys(data[0]).map(key => ({
+
+    const isCompareSheet = compareSheets.includes(sheetName);
+    const disableGrouping = noCollapseSheets.includes(sheetName);
+    const allKeys = columnNames || Array.from(new Set(data.flatMap(row => Object.keys(row).filter(k => !k.startsWith('_')))));
+
+    let validColumns;
+    if (disableGrouping) {
+        validColumns = allKeys;
+    } else {
+        validColumns = allKeys.filter(key => {
+            const nonEmptyCount = data.filter(row => {
+                const value = row[key];
+                return value !== '' && value !== null && value !== undefined && value !== 'EMPTY';
+            }).length;
+            return nonEmptyCount > 0 && nonEmptyCount >= Math.max(1, Math.ceil(data.length * 0.01));
+        });
+
+        if (!isCompareSheet) {
+            validColumns = validColumns.sort();
+        }
+    }
+
+    const columnFieldMap = validColumns.map((key, index) => ({
         title: key,
-        field: key,
-        width: 150,
-        resizable: true,
-        headerFilter: 'input'
+        field: `field_${index}`,
+        originalKey: key,
     }));
-    
-    // 建立 Tabulator 表格
-    tables[sheetName] = new Tabulator(tableElement, {
-        data: data,
+
+    const tabulatorData = data.map((row, rowIndex) => {
+        const safeRow = {};
+        columnFieldMap.forEach(col => {
+            safeRow[col.field] = row[col.originalKey];
+        });
+        safeRow._indentLevel = row._indentLevel;
+        safeRow._isSubHeader = row._isSubHeader;
+        safeRow._sourceIndex = rowIndex;
+        return safeRow;
+    });
+
+    const avgWidth = Math.max(120, Math.min(200, 1400 / Math.max(validColumns.length, 1)));
+    const columns = columnFieldMap.map(col => ({
+        title: col.title,
+        field: col.field,
+        width: avgWidth,
+        minWidth: 80,
+        resizable: true,
+        headerFilter: 'input',
+        tooltip: true,
+        formatter: (cell) => {
+            const value = cell.getValue();
+            return value === null || value === undefined || value === '' ? '' : String(value);
+        },
+    }));
+
+    if (isCompareSheet) {
+        renderCompareSheetTable(sheetName, tableElement, tabulatorData, columnFieldMap, columns);
+        return;
+    }
+
+    let groupByField = null;
+    if (!disableGrouping && columnFieldMap.length > 0) {
+        const firstField = columnFieldMap[0].field;
+        const uniqueCount = new Set(tabulatorData.map(r => r[firstField])).size;
+        if (uniqueCount < tabulatorData.length * 0.5 && uniqueCount > 1) {
+            groupByField = firstField;
+        }
+    }
+
+    const tabulatorConfig = {
+        data: tabulatorData,
         columns: columns,
-        layout: 'fitDataFill',
-        responsiveLayout: 'collapse',
+        layout: 'fitColumns',
+        layoutColumnsOnNewData: false,
+        responsiveLayout: false,
         pagination: 'local',
         paginationSize: 25,
         movableColumns: true,
         selectable: true,
         clipboard: true,
+        virtualDom: true,
+        virtualDomBuffer: 10,
+        height: '600px',
+    };
+
+    if (groupByField) {
+        tabulatorConfig.groupBy = groupByField;
+        tabulatorConfig.groupStartOpen = false;
+    }
+
+    tables[sheetName] = new Tabulator(tableElement, tabulatorConfig);
+}
+
+function renderCompareSheetTable(sheetName, tableElement, tabulatorData, columnFieldMap, columns) {
+    const firstField = columnFieldMap[0]?.field;
+    const mainRows = firstField
+        ? tabulatorData.filter(row => String(row[firstField] ?? '').trim() !== '')
+        : tabulatorData;
+
+    tables[sheetName] = new Tabulator(tableElement, {
+        data: mainRows,
+        columns: columns,
+        layout: 'fitColumns',
+        layoutColumnsOnNewData: false,
+        responsiveLayout: false,
+        pagination: 'local',
+        paginationSize: 25,
+        movableColumns: true,
+        selectable: true,
+        clipboard: true,
+        virtualDom: true,
+        virtualDomBuffer: 10,
+        height: '600px',
+        rowFormatter: (row) => {
+            row.getElement().classList.add('compare-main-row');
+        },
+        rowClick: (e, row) => {
+            const rowData = row.getData();
+            const selectedValue = String(rowData[firstField] ?? '').trim();
+            const detailConfig = buildCompareDetailConfig(tabulatorData, rowData, columnFieldMap, firstField);
+            showDetailModal(sheetName, selectedValue, detailConfig.rows, detailConfig.columns);
+        },
     });
+}
+
+function buildCompareDetailConfig(tabulatorData, selectedRow, columnFieldMap, firstField) {
+    const startIndex = selectedRow._sourceIndex;
+    const nextMainRow = tabulatorData.find(row => {
+        return row._sourceIndex > startIndex && String(row[firstField] ?? '').trim() !== '';
+    });
+    const endIndex = nextMainRow ? nextMainRow._sourceIndex : Infinity;
+    const detailBlock = tabulatorData.filter(row => row._sourceIndex > startIndex && row._sourceIndex < endIndex);
+
+    if (detailBlock.length === 0) {
+        return { rows: [], columns: [] };
+    }
+
+    const headerRow = detailBlock[0];
+    const detailFieldMap = columnFieldMap
+        .map((col, index) => ({
+            sourceField: col.field,
+            field: `detail_${index}`,
+            title: String(headerRow[col.field] ?? '').trim(),
+        }))
+        .filter(col => col.title !== '');
+
+    const detailColumns = detailFieldMap.map(col => ({
+        title: col.title,
+        field: col.field,
+        minWidth: 100,
+        resizable: true,
+        headerFilter: 'input',
+        tooltip: true,
+        formatter: (cell) => {
+            const value = cell.getValue();
+            return value === null || value === undefined || value === '' ? '' : String(value);
+        },
+    }));
+
+    const detailRows = detailBlock.slice(1).map(row => {
+        const detailRow = {};
+        detailFieldMap.forEach(col => {
+            detailRow[col.field] = row[col.sourceField];
+        });
+        return detailRow;
+    });
+
+    return { rows: detailRows, columns: detailColumns };
+}
+function showDetailModal(sheetName, selectedValue, detailRows, columns) {
+    closeDetailModal();
+
+    const modal = document.createElement('div');
+    modal.id = 'detailModal';
+    modal.className = 'detail-modal';
+    modal.innerHTML = `
+        <div class="detail-modal-backdrop" onclick="closeDetailModal()"></div>
+        <div class="detail-modal-panel" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle">
+            <div class="detail-modal-header">
+                <h3 id="detailModalTitle">${escapeHtml(sheetName)} - ${escapeHtml(selectedValue)}</h3>
+                <button type="button" class="detail-modal-close" aria-label="Close" onclick="closeDetailModal()">&times;</button>
+            </div>
+            <div class="detail-modal-count">${detailRows.length} 筆明細資料</div>
+            <div id="detailTable" class="detail-table-wrapper"></div>
+        </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    detailTable = new Tabulator('#detailTable', {
+        data: detailRows,
+        columns: columns,
+        layout: 'fitColumns',
+        layoutColumnsOnNewData: false,
+        responsiveLayout: false,
+        pagination: 'local',
+        paginationSize: 10,
+        movableColumns: true,
+        clipboard: true,
+        height: '420px',
+        placeholder: '沒有符合條件的明細資料',
+    });
+}
+
+function closeDetailModal() {
+    if (detailTable) {
+        detailTable.destroy();
+        detailTable = null;
+    }
+
+    const modal = document.getElementById('detailModal');
+    if (modal) {
+        modal.remove();
+    }
+}
+
+function escapeHtml(value) {
+    const div = document.createElement('div');
+    div.textContent = String(value ?? '');
+    return div.innerHTML;
+}
+
+function renderRawSheet(sheet) {
+    const rawContainer = document.getElementById('rawView');
+    if (!rawContainer) return;
+    
+    const rawHtml = XLSX.utils.sheet_to_html(sheet, {
+        editable: false,
+        blankrows: true,
+        header: ''
+    });
+    rawContainer.innerHTML = `<div class="raw-sheet-wrapper">${rawHtml}</div>`;
+}
+
+// 構建基於縮排層級的分組數據結構
+function buildIndentGroups(data) {
+    const grouped = [];
+    let currentGroupKey = null;
+    let groupCounter = 0;
+    
+    data.forEach((row, idx) => {
+        const indentLevel = row._indentLevel || 0;
+        const isSubHeader = row._isSubHeader || false;
+        
+        if (indentLevel === 0 && !isSubHeader) {
+            // 主行，創建新分組
+            groupCounter++;
+            currentGroupKey = `Group_${groupCounter}`;
+        } else if (indentLevel === 0 && isSubHeader) {
+            // 子表頭，仍屬於當前分組
+            if (!currentGroupKey) {
+                groupCounter++;
+                currentGroupKey = `Group_${groupCounter}`;
+            }
+        }
+        
+        // 添加分組鍵
+        row._groupKey = currentGroupKey || `Group_${++groupCounter}`;
+        grouped.push(row);
+    });
+    
+    return grouped;
 }
 
 // 渲染統計數據
 function renderStats(data) {
     const statsContainer = document.getElementById('stats');
     
-    // 計算統計資料
+    // 計算統計資料（排除內部標記）
     const rows = data.length;
-    const cols = Object.keys(data[0]).length;
+    const allKeys = data.length > 0 ? Object.keys(data[0]).filter(k => !k.startsWith('_')) : [];
+    const cols = allKeys.length;
     
     // 尋找數字欄位
     let numericCols = 0;
-    Object.keys(data[0]).forEach(key => {
+    allKeys.forEach(key => {
         const values = data.map(row => row[key]);
-        if (values.some(v => !isNaN(v) && v !== '')) {
+        if (values.some(v => {
+            const num = parseFloat(v);
+            return !isNaN(num) && v !== '';
+        })) {
             numericCols++;
         }
     });
@@ -377,7 +735,8 @@ function buildChartConfigPanel(data) {
     xSelect.innerHTML = '';
     ySelect.innerHTML = '';
 
-    const columns = Object.keys(data[0] || {});
+    // 排除內部標記欄位
+    const columns = Object.keys(data[0] || {}).filter(col => !col.startsWith('_'));
     const numericFields = columns.filter(col => isNumericColumn(data, col));
 
     columns.forEach(col => {
@@ -563,3 +922,4 @@ function showLoading(message) {
     fileInfo.innerHTML = '<div class="loading"><i class="fas fa-spinner fa-spin"></i> ' + message + '</div>';
     fileInfo.classList.add('show');
 }
+
