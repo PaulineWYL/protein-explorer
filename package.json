@@ -1,0 +1,16 @@
+{
+  "name": "excel-visualizer",
+  "version": "1.0.0",
+  "description": "輕量級 Excel 檔案快速視覺化工具",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": ["excel", "visualization", "web-ui"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.0"
+  }
+}
