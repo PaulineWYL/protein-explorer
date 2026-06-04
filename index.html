@@ -235,6 +235,162 @@
             margin-top: 20px;
             opacity: 0.8;
         }
+        
+        #table {
+            width: 100%;
+            min-height: 600px;
+            overflow: auto;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        
+        .table-wrapper {
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+        }
+        
+        .tabulator {
+            font-size: 0.95em;
+            width: 100%;
+        }
+        
+        .tabulator-cell {
+            padding: 8px 10px;
+            word-break: break-word;
+            white-space: normal;
+        }
+        
+        /* 原始檔案檢視 */
+        #rawView {
+            width: 100%;
+            min-height: 600px;
+            overflow: auto;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: inset 0 0 0 1px rgba(0,0,0,0.05);
+            padding: 10px;
+        }
+
+        .raw-sheet-wrapper {
+            width: max-content;
+            min-width: 100%;
+            overflow: auto;
+        }
+
+        .raw-sheet-wrapper table {
+            border-collapse: collapse;
+            width: 100%;
+            table-layout: fixed;
+        }
+
+        .raw-sheet-wrapper th,
+        .raw-sheet-wrapper td {
+            padding: 6px 10px;
+            border: 1px solid #ddd;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .raw-sheet-wrapper td {
+            max-width: 220px;
+            word-break: break-word;
+        }
+        
+        /* 確保滾動條永久顯示 */
+        .tabulator .tabulator-tableholder {
+            overflow: scroll !important;
+        }
+
+        .detail-row-trigger,
+        .compare-main-row {
+            cursor: pointer;
+        }
+
+        .detail-row-trigger:hover,
+        .compare-main-row:hover {
+            background: #f0f2ff !important;
+        }
+
+        .compare-main-row .tabulator-cell {
+            background: #d9eaf7;
+        }
+
+        .detail-modal .tabulator-row .tabulator-cell {
+            background: #fce4d6;
+        }
+
+        .detail-modal {
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 24px;
+        }
+
+        .detail-modal-backdrop {
+            position: absolute;
+            inset: 0;
+            background: rgba(16, 24, 40, 0.58);
+        }
+
+        .detail-modal-panel {
+            position: relative;
+            width: min(1180px, 96vw);
+            max-height: 88vh;
+            overflow: hidden;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 24px 70px rgba(0,0,0,0.28);
+            padding: 20px;
+        }
+
+        .detail-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            margin-bottom: 8px;
+        }
+
+        .detail-modal-header h3 {
+            min-width: 0;
+            color: #222;
+            font-size: 1.15rem;
+            overflow-wrap: anywhere;
+        }
+
+        .detail-modal-close {
+            width: 36px;
+            height: 36px;
+            flex: 0 0 auto;
+            border: 0;
+            border-radius: 6px;
+            background: #f2f4f7;
+            color: #333;
+            cursor: pointer;
+            font-size: 1.5rem;
+            line-height: 1;
+        }
+
+        .detail-modal-close:hover {
+            background: #e4e7ec;
+        }
+
+        .detail-modal-count {
+            margin-bottom: 12px;
+            color: #667085;
+            font-size: 0.92rem;
+        }
+
+        .detail-table-wrapper {
+            width: 100%;
+            overflow: auto;
+        }
     </style>
 </head>
 <body>
