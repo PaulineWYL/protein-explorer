@@ -272,7 +272,16 @@
                 <div class="sheet-selector" id="comparePanel" style="margin-bottom: 20px; display: none;">
                     <label for="compareAccessionSelect">比較 Accession：</label>
                     <select id="compareAccessionSelect" onchange="updateComparisonChart(this.value)"></select>
-                    <span style="margin-left: 10px; color: #666;">顯示 MAD / MADEV / MADEVNP Relative abundance (%)</span>
+                    <label for="compareYAxisSelect" style="margin-left: 15px;">Y 軸參數：</label>
+                    <select id="compareYAxisSelect" onchange="updateComparisonChart(document.getElementById('compareAccessionSelect').value)"></select>
+                </div>
+
+                <div class="sheet-selector" id="chartConfigPanel" style="margin-bottom: 20px; display: none;">
+                    <label for="xAxisSelect">X 軸：</label>
+                    <select id="xAxisSelect" onchange="updateChartConfig()"></select>
+                    <label for="yAxisSelect" style="margin-left: 15px;">Y 軸：</label>
+                    <select id="yAxisSelect" onchange="updateChartConfig()"></select>
+                    <button class="btn" style="margin-left: 15px;" onclick="refreshChart()">重新繪製</button>
                 </div>
                 
                 <div class="stats" id="stats"></div>
@@ -291,7 +300,7 @@
                 
                 <div id="table" class="tab-content active"></div>
                 <div id="charts" class="tab-content">
-                    <div id="compareSummary" style="margin-bottom: 20px; color: #333;"></div>
+                    <div id="compareSummary" style="margin-bottom: 20px; color: #333; display:none;"></div>
                     <div id="compareChartContainer"></div>
                     <div id="chartsContainer"></div>
                 </div>
