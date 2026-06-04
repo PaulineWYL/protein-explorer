@@ -118,7 +118,20 @@ function initializeSheetSelector() {
 // 切換工作表
 function switchSheet(sheetName) {
     const sheet = currentWorkbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    let data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    
+    // 清理數據：將 'EMPTY' 字符串和其他可能的空值表示轉換為空字符串
+    data = data.map(row => {
+        const cleanedRow = {};
+        for (const [key, value] of Object.entries(row)) {
+            if (value === 'EMPTY' || value === null || value === undefined) {
+                cleanedRow[key] = '';
+            } else {
+                cleanedRow[key] = value;
+            }
+        }
+        return cleanedRow;
+    });
     
     if (data.length === 0) {
         showError('該工作表沒有資料');
