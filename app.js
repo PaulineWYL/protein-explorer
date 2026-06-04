@@ -157,7 +157,13 @@ function renderTable(sheetName, data) {
         tables[sheetName].destroy();
     }
     
-    tableContainer.innerHTML = '<div id="tabulator-' + sanitizeId(sheetName) + '" style="margin-top: 20px;"></div>';
+    const tableId = 'tabulator-' + sanitizeId(sheetName);
+    tableContainer.innerHTML = `<div id="${tableId}" style="margin-top: 20px;"></div>`;
+    const tableElement = document.getElementById(tableId);
+    if (!tableElement) {
+        showError('無法建立表格，請重新整理頁面。');
+        return;
+    }
     
     // 準備欄位定義
     const columns = Object.keys(data[0]).map(key => ({
@@ -169,7 +175,7 @@ function renderTable(sheetName, data) {
     }));
     
     // 建立 Tabulator 表格
-    tables[sheetName] = new Tabulator('#tabulator-' + sanitizeId(sheetName), {
+    tables[sheetName] = new Tabulator(tableElement, {
         data: data,
         columns: columns,
         layout: 'fitDataFill',
@@ -491,6 +497,7 @@ function createSingleBarChart(data, xLabel, yLabel) {
 // 渲染檔案資訊
 function renderInfo(sheet, data) {
     const infoContent = document.getElementById('infoContent');
+    if (!infoContent) return;
     
     const info = {
         '工作表資訊': {
@@ -507,6 +514,7 @@ function renderInfo(sheet, data) {
         }))
     };
     
+    infoContent.style.display = 'block';
     infoContent.textContent = JSON.stringify(info, null, 2);
 }
 
