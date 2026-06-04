@@ -377,7 +377,7 @@ function renderCompareSheetTable(sheetName, tableElement, tabulatorData, columnF
         ? tabulatorData.filter(row => String(row[firstField] ?? '').trim() !== '')
         : tabulatorData;
 
-    tables[sheetName] = new Tabulator(tableElement, {
+    const table = new Tabulator(tableElement, {
         data: mainRows,
         columns: columns,
         layout: 'fitColumns',
@@ -394,13 +394,16 @@ function renderCompareSheetTable(sheetName, tableElement, tabulatorData, columnF
         rowFormatter: (row) => {
             row.getElement().classList.add('compare-main-row');
         },
-        rowClick: (e, row) => {
-            const rowData = row.getData();
-            const selectedValue = String(rowData[firstField] ?? '').trim();
-            const detailConfig = buildCompareDetailConfig(tabulatorData, rowData, columnFieldMap, firstField);
-            showDetailModal(sheetName, selectedValue, detailConfig.rows, detailConfig.columns);
-        },
     });
+
+    table.on('rowClick', (e, row) => {
+        const rowData = row.getData();
+        const selectedValue = String(rowData[firstField] ?? '').trim();
+        const detailConfig = buildCompareDetailConfig(tabulatorData, rowData, columnFieldMap, firstField);
+        showDetailModal(sheetName, selectedValue, detailConfig.rows, detailConfig.columns);
+    });
+
+    tables[sheetName] = table;
 }
 
 function buildCompareDetailConfig(tabulatorData, selectedRow, columnFieldMap, firstField) {
@@ -454,8 +457,7 @@ function showDetailModal(sheetName, selectedValue, detailRows, columns) {
     modal.id = 'detailModal';
     modal.className = 'detail-modal';
     modal.innerHTML = `
-        <div class="detail-modal-backdrop" onclick="closeDetailModal()"></div>
-        <div class="detail-modal-panel" role="dialog" aria-modal="true" aria-labelledby="detailModalTitle">
+        <div class="detail-modal-panel" role="dialog" aria-labelledby="detailModalTitle">
             <div class="detail-modal-header">
                 <h3 id="detailModalTitle">${escapeHtml(sheetName)} - ${escapeHtml(selectedValue)}</h3>
                 <button type="button" class="detail-modal-close" aria-label="Close" onclick="closeDetailModal()">&times;</button>
@@ -466,6 +468,7 @@ function showDetailModal(sheetName, selectedValue, detailRows, columns) {
     `;
 
     document.body.appendChild(modal);
+    makeDetailModalDraggable(modal);
 
     detailTable = new Tabulator('#detailTable', {
         data: detailRows,
@@ -479,6 +482,60 @@ function showDetailModal(sheetName, selectedValue, detailRows, columns) {
         clipboard: true,
         height: '420px',
         placeholder: '沒有符合條件的明細資料',
+    });
+
+    setTimeout(() => detailTable?.redraw(true), 0);
+}
+
+function makeDetailModalDraggable(modal) {
+    const header = modal.querySelector('.detail-modal-header');
+    if (!header) return;
+
+    let startX = 0;
+    let startY = 0;
+    let initialLeft = 0;
+    let initialTop = 0;
+    let isDragging = false;
+
+    const moveModal = (clientX, clientY) => {
+        if (!isDragging) return;
+
+        const maxLeft = window.innerWidth - modal.offsetWidth;
+        const maxTop = window.innerHeight - modal.offsetHeight;
+        const nextLeft = Math.min(Math.max(0, initialLeft + clientX - startX), Math.max(0, maxLeft));
+        const nextTop = Math.min(Math.max(0, initialTop + clientY - startY), Math.max(0, maxTop));
+
+        modal.style.left = `${nextLeft}px`;
+        modal.style.top = `${nextTop}px`;
+        modal.style.right = 'auto';
+        modal.style.bottom = 'auto';
+    };
+
+    header.addEventListener('pointerdown', (event) => {
+        if (event.target.closest('button')) return;
+
+        isDragging = true;
+        startX = event.clientX;
+        startY = event.clientY;
+        initialLeft = modal.offsetLeft;
+        initialTop = modal.offsetTop;
+        header.setPointerCapture(event.pointerId);
+        modal.classList.add('is-dragging');
+    });
+
+    header.addEventListener('pointermove', (event) => {
+        moveModal(event.clientX, event.clientY);
+    });
+
+    header.addEventListener('pointerup', (event) => {
+        isDragging = false;
+        header.releasePointerCapture(event.pointerId);
+        modal.classList.remove('is-dragging');
+    });
+
+    header.addEventListener('pointercancel', () => {
+        isDragging = false;
+        modal.classList.remove('is-dragging');
     });
 }
 
