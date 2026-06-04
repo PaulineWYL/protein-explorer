@@ -1,10 +1,11 @@
 let currentWorkbook = null;
 let tables = {};
 let charts = {};
+let currentSheetData = [];
+let currentSheetName = '';
+let chartConfig = { xAxis: '', yAxis: '' };
 let sheetDataMap = {};
-let compareChart = null;
 const compareSheets = ['MAD', 'MADEV', 'MADEVNP'];
-const compareField = 'Relative abundance (%)';
 
 // 初始化拖曳上傳
 const uploadArea = document.getElementById('uploadArea');
@@ -117,7 +118,20 @@ function initializeSheetSelector() {
 // 切換工作表
 function switchSheet(sheetName) {
     const sheet = currentWorkbook.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    let data = XLSX.utils.sheet_to_json(sheet, { defval: '' });
+    
+    // 清理數據：將 'EMPTY' 字符串和其他可能的空值表示轉換為空字符串
+    data = data.map(row => {
+        const cleanedRow = {};
+        for (const [key, value] of Object.entries(row)) {
+            if (value === 'EMPTY' || value === null || value === undefined) {
+                cleanedRow[key] = '';
+            } else {
+                cleanedRow[key] = value;
+            }
+        }
+        return cleanedRow;
+    });
     
     if (data.length === 0) {
         showError('該工作表沒有資料');
@@ -132,9 +146,6 @@ function switchSheet(sheetName) {
     
     // 建立圖表
     renderCharts(sheetName, data);
-    
-    // 顯示檔案資訊
-    renderInfo(sheet, data);
 }
 
 // 渲染表格
@@ -146,7 +157,7 @@ function renderTable(sheetName, data) {
         tables[sheetName].destroy();
     }
     
-    tableContainer.innerHTML = '<div id="tabulator-' + sheetName + '" style="margin-top: 20px;"></div>';
+    tableContainer.innerHTML = '<div id="tabulator-' + sanitizeId(sheetName) + '" style="margin-top: 20px;"></div>';
     
     // 準備欄位定義
     const columns = Object.keys(data[0]).map(key => ({
@@ -158,7 +169,7 @@ function renderTable(sheetName, data) {
     }));
     
     // 建立 Tabulator 表格
-    tables[sheetName] = new Tabulator('#tabulator-' + sheetName, {
+    tables[sheetName] = new Tabulator('#tabulator-' + sanitizeId(sheetName), {
         data: data,
         columns: columns,
         layout: 'fitDataFill',
@@ -217,37 +228,12 @@ function renderCharts(sheetName, data) {
     Object.values(charts).forEach(chart => chart.destroy());
     charts = {};
     
-    // 尋找第一個數字欄位和第一個文字欄位
-    const columns = Object.keys(data[0]);
-    let numericCol = null;
-    let textCol = null;
-    
-    columns.forEach(col => {
-        const values = data.map(row => row[col]);
-        if (!numericCol && values.some(v => !isNaN(v) && v !== '' && v !== null)) {
-            numericCol = col;
-        }
-        if (!textCol && !values.every(v => !isNaN(v) && v !== '' && v !== null)) {
-            textCol = col;
-        }
-    });
-    
-    if (numericCol && textCol) {
-        // 建立分組統計圖
-        const grouped = groupByAndSum(data, textCol, numericCol);
-        
-        if (grouped.length > 0 && grouped.length <= 20) {
-            createBarChart(grouped, textCol, numericCol);
-        }
-    }
-    
-    if (numericCol) {
-        // 建立分佈直方圖
-        createHistogram(data, numericCol);
-    }
+    currentSheetData = data;
+    currentSheetName = sheetName;
+    buildChartConfigPanel(data);
+    refreshChart();
 }
 
-// 分組統計
 function loadCompareSheetData() {
     sheetDataMap = {};
     compareSheets.forEach(sheetName => {
@@ -259,26 +245,28 @@ function loadCompareSheetData() {
 }
 
 function initializeComparePanel() {
-    const comparePanel = document.getElementById('comparePanel');
+    const panel = document.getElementById('comparePanel');
     const select = document.getElementById('compareAccessionSelect');
+    const yAxisSelect = document.getElementById('compareYAxisSelect');
     select.innerHTML = '';
-    comparePanel.style.display = 'none';
+    yAxisSelect.innerHTML = '';
 
-    const accessions = new Set();
+    const allAccessions = new Set();
     Object.values(sheetDataMap).forEach(data => {
         data.forEach(row => {
             if (row.Accession) {
-                accessions.add(String(row.Accession).trim());
+                allAccessions.add(String(row.Accession).trim());
             }
         });
     });
 
-    const sortedAccessions = Array.from(accessions).sort();
+    const sortedAccessions = Array.from(allAccessions).sort();
     if (sortedAccessions.length === 0) {
+        panel.style.display = 'none';
         return;
     }
 
-    comparePanel.style.display = 'block';
+    panel.style.display = 'block';
     sortedAccessions.forEach(acc => {
         const option = document.createElement('option');
         option.value = acc;
@@ -286,18 +274,37 @@ function initializeComparePanel() {
         select.appendChild(option);
     });
 
+    // Populate Y-axis options with numeric fields
+    const firstSheetData = sheetDataMap[compareSheets[0]];
+    if (firstSheetData && firstSheetData.length > 0) {
+        const columns = Object.keys(firstSheetData[0]);
+        const numericFields = columns.filter(col => isNumericColumn(firstSheetData, col));
+        numericFields.forEach(col => {
+            const option = document.createElement('option');
+            option.value = col;
+            option.textContent = col;
+            yAxisSelect.appendChild(option);
+        });
+        // Set default to 'Relative abundance (%)' if available
+        if (columns.includes('Relative abundance (%)')) {
+            yAxisSelect.value = 'Relative abundance (%)';
+        }
+    }
+
     updateComparisonChart(sortedAccessions[0]);
 }
 
 function updateComparisonChart(accession) {
     if (!accession) return;
-    createCompareChart(accession);
+    const yAxisSelect = document.getElementById('compareYAxisSelect');
+    const yField = yAxisSelect.value || 'Relative abundance (%)';
+    createCompareChart(accession, yField);
 }
 
-function createCompareChart(accession) {
+function createCompareChart(accession, yField = 'Relative abundance (%)') {
     const compareValues = compareSheets.map(sheetName => {
         const row = sheetDataMap[sheetName]?.find(r => String(r.Accession).trim() === String(accession).trim());
-        const rawValue = row ? parseFloat(row[compareField]) : NaN;
+        const rawValue = row ? parseFloat(row[yField]) : NaN;
         return {
             sheetName,
             value: Number.isFinite(rawValue) ? rawValue : 0,
@@ -306,28 +313,34 @@ function createCompareChart(accession) {
         };
     });
 
-    const compareChartContainer = document.getElementById('compareChartContainer');
     const summary = document.getElementById('compareSummary');
-    compareChartContainer.innerHTML = `
+    const container = document.getElementById('compareChartContainer');
+    container.innerHTML = `
         <div id="compareChartWrapper" style="margin-bottom: 30px;">
-            <h3 style="margin-bottom: 15px;">Accession: ${accession} 的 Relative abundance (%) 比較</h3>
+            <h3 style="margin-bottom: 15px;">Accession: ${accession} 的 ${yField} 比較</h3>
             <div style="position: relative; height: 320px;">
                 <canvas id="compareChart"></canvas>
             </div>
         </div>
     `;
-
-    if (compareChart) {
-        compareChart.destroy();
-    }
+    summary.style.display = 'block';
+    summary.innerHTML = compareValues.map(item => {
+        const relativeText = item.hasData ? item.value.toFixed(6) : '無資料';
+        const abundanceValue = item.hasData ? item.row[`Abundance: ${item.sheetName}`] ?? '-' : '-';
+        const countValue = item.hasData ? item.row[`Abundances Count: ${item.sheetName}`] ?? '-' : '-';
+        return `<div style="margin-bottom: 6px;"><strong>${item.sheetName}</strong>: Relative abundance (%) = ${relativeText}, Abundance = ${abundanceValue}, Count = ${countValue}</div>`;
+    }).join('');
 
     const ctx = document.getElementById('compareChart').getContext('2d');
-    compareChart = new Chart(ctx, {
+    if (charts.compareChart) {
+        charts.compareChart.destroy();
+    }
+    charts.compareChart = new Chart(ctx, {
         type: 'bar',
         data: {
             labels: compareValues.map(item => item.sheetName),
             datasets: [{
-                label: 'Relative abundance (%)',
+                label: yField,
                 data: compareValues.map(item => item.value),
                 backgroundColor: ['#4f8cff', '#7dbeff', '#a8d5ff'],
                 borderColor: ['#2f6fe5', '#4f9fe5', '#6bb8e5'],
@@ -343,137 +356,137 @@ function createCompareChart(accession) {
             scales: {
                 y: {
                     beginAtZero: true,
-                    title: { display: true, text: 'Relative abundance (%)' },
+                    title: { display: true, text: yField },
                 },
             },
         },
     });
-
-    summary.innerHTML = compareValues.map(item => {
-        const relativeText = item.hasData ? item.value.toFixed(6) : '無資料';
-        const abundanceValue = item.hasData ? item.row[`Abundance: ${item.sheetName}`] ?? '-' : '-';
-        const countValue = item.hasData ? item.row[`Abundances Count: ${item.sheetName}`] ?? '-' : '-';
-        return `<div style="margin-bottom: 6px;"><strong>${item.sheetName}</strong>: Relative abundance (%) = ${relativeText}, Abundance = ${abundanceValue}, Count = ${countValue}</div>`;
-    }).join('');
 }
 
-function groupByAndSum(data, groupCol, sumCol) {
-    const grouped = {};
-    
-    data.forEach(row => {
-        const groupKey = String(row[groupCol]).substring(0, 20);
-        const value = parseFloat(row[sumCol]) || 0;
-        
-        if (!grouped[groupKey]) {
-            grouped[groupKey] = 0;
-        }
-        grouped[groupKey] += value;
+function buildChartConfigPanel(data) {
+    const panel = document.getElementById('chartConfigPanel');
+    const xSelect = document.getElementById('xAxisSelect');
+    const ySelect = document.getElementById('yAxisSelect');
+
+    xSelect.innerHTML = '';
+    ySelect.innerHTML = '';
+
+    const columns = Object.keys(data[0] || {});
+    const numericFields = columns.filter(col => isNumericColumn(data, col));
+
+    columns.forEach(col => {
+        const option = document.createElement('option');
+        option.value = col;
+        option.textContent = col;
+        xSelect.appendChild(option);
     });
-    
-    return Object.entries(grouped)
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 15)
-        .map(([key, value]) => ({ label: key, value: value }));
+
+    numericFields.forEach(col => {
+        const option = document.createElement('option');
+        option.value = col;
+        option.textContent = col;
+        ySelect.appendChild(option);
+    });
+
+    if (columns.length > 0 && numericFields.length > 0) {
+        chartConfig.xAxis = xSelect.value = columns[0];
+        chartConfig.yAxis = ySelect.value = numericFields[0];
+        panel.style.display = 'block';
+    } else {
+        panel.style.display = 'none';
+    }
 }
 
-// 建立條形圖
-function createBarChart(data, xLabel, yLabel) {
+// 將工作表名稱轉換為有效的 HTML ID
+function sanitizeId(str) {
+    return str.replace(/[^a-zA-Z0-9-_]/g, '_');
+}
+
+function isNumericColumn(data, col) {
+    return data.some(row => {
+        const value = row[col];
+        return value !== '' && value !== null && !Number.isNaN(parseFloat(value));
+    });
+}
+
+function updateChartConfig() {
+    const xSelect = document.getElementById('xAxisSelect');
+    const ySelect = document.getElementById('yAxisSelect');
+    chartConfig.xAxis = xSelect.value;
+    chartConfig.yAxis = ySelect.value;
+}
+
+function refreshChart() {
+    if (!currentSheetData.length) return;
+    if (!chartConfig.xAxis || !chartConfig.yAxis) return;
+
+    const chartsContainer = document.getElementById('chartsContainer');
+    chartsContainer.innerHTML = '';
+    Object.values(charts).forEach(chart => chart.destroy());
+    charts = {};
+
+    const aggregated = aggregateByField(currentSheetData, chartConfig.xAxis, chartConfig.yAxis);
+    createSingleBarChart(aggregated, chartConfig.xAxis, chartConfig.yAxis);
+}
+
+function aggregateByField(data, xField, yField) {
+    const grouped = {};
+    data.forEach(row => {
+        const category = String(row[xField] ?? '').trim() || '空值';
+        const value = parseFloat(row[yField]);
+        if (Number.isNaN(value)) return;
+        grouped[category] = (grouped[category] || 0) + value;
+    });
+
+    return Object.entries(grouped)
+        .map(([label, value]) => ({ label, value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 20);
+}
+
+function createSingleBarChart(data, xLabel, yLabel) {
     const container = document.createElement('div');
     container.style.marginBottom = '30px';
     container.innerHTML = `
-        <h3 style="margin-bottom: 15px;">按 "${xLabel}" 統計 "${yLabel}"</h3>
-        <div style="position: relative; height: 300px;">
-            <canvas id="barChart"></canvas>
+        <h3 style="margin-bottom: 15px;">${xLabel} vs ${yLabel}</h3>
+        <div style="position: relative; height: 360px;">
+            <canvas id="singleBarChart"></canvas>
         </div>
     `;
-    
     document.getElementById('chartsContainer').appendChild(container);
-    
-    const ctx = container.querySelector('#barChart').getContext('2d');
-    charts['barChart'] = new Chart(ctx, {
+
+    const ctx = container.querySelector('#singleBarChart').getContext('2d');
+    charts['singleBar'] = new Chart(ctx, {
         type: 'bar',
         data: {
-            labels: data.map(d => d.label),
+            labels: data.map(item => item.label),
             datasets: [{
                 label: yLabel,
-                data: data.map(d => d.value),
+                data: data.map(item => item.value),
                 backgroundColor: '#667eea',
                 borderColor: '#764ba2',
-                borderWidth: 1
-            }]
+                borderWidth: 1,
+            }],
         },
         options: {
             responsive: true,
             maintainAspectRatio: false,
             plugins: {
-                legend: { display: true }
+                legend: { display: false },
             },
             scales: {
-                y: { beginAtZero: true }
-            }
-        }
+                y: {
+                    beginAtZero: true,
+                    title: { display: true, text: yLabel },
+                },
+                x: {
+                    title: { display: true, text: xLabel },
+                },
+            },
+        },
     });
 }
 
-// 建立直方圖
-function createHistogram(data, col) {
-    const values = data
-        .map(row => parseFloat(row[col]))
-        .filter(v => !isNaN(v) && v !== null);
-    
-    if (values.length === 0) return;
-    
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-    const binCount = Math.min(20, Math.ceil(Math.sqrt(values.length)));
-    const binSize = (max - min) / binCount || 1;
-    
-    const bins = Array(binCount).fill(0);
-    values.forEach(v => {
-        const binIndex = Math.min(binCount - 1, Math.floor((v - min) / binSize));
-        bins[binIndex]++;
-    });
-    
-    const binLabels = Array.from({length: binCount}, (_, i) => 
-        (min + i * binSize).toFixed(1)
-    );
-    
-    const container = document.createElement('div');
-    container.style.marginBottom = '30px';
-    container.innerHTML = `
-        <h3 style="margin-bottom: 15px;">"${col}" 分佈直方圖</h3>
-        <div style="position: relative; height: 300px;">
-            <canvas id="histogramChart"></canvas>
-        </div>
-    `;
-    
-    document.getElementById('chartsContainer').appendChild(container);
-    
-    const ctx = container.querySelector('#histogramChart').getContext('2d');
-    charts['histogramChart'] = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels: binLabels,
-            datasets: [{
-                label: '頻數',
-                data: bins,
-                backgroundColor: '#764ba2',
-                borderColor: '#667eea',
-                borderWidth: 1
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            plugins: {
-                legend: { display: false }
-            },
-            scales: {
-                y: { beginAtZero: true, title: { display: true, text: '頻數' } }
-            }
-        }
-    });
-}
 
 // 渲染檔案資訊
 function renderInfo(sheet, data) {
