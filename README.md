@@ -28,7 +28,7 @@
 ### 方式 2: 命令行啟動
 
 ```bash
-cd c:\Users\PaulineWang\Desktop\protein
+cd c:\Users\[you]\Desktop\protein
 python -m http.server 8000
 ```
 
@@ -54,14 +54,6 @@ python -m http.server 8000
    - 調整欄寬：拖曳欄邊界調整寬度
    - 複製：選擇儲存格並複製到剪貼板
 
-## 技術棧
-
-- **前端框架**: 純 JavaScript (無框架依賴)
-- **表格庫**: Tabulator.js - 強大的數據表格
-- **圖表庫**: Chart.js - 簡潔的圖表繪製
-- **Excel 解析**: SheetJS (xlsx) - 廣泛支持的 Excel 庫
-- **樣式**: 現代化的 CSS3 設計
-
 ## 文件結構
 
 ```
@@ -69,32 +61,7 @@ protein/
 ├── index.html          # 主 HTML 檔案
 ├── app.js             # JavaScript 邏輯
 ├── start_server.bat   # Windows 啟動腳本
-└── 26042903-Protein Peptide Report.xlsx  # 示例 Excel 檔案
 ```
-
-## 功能詳解
-
-### 📊 表格檢視
-
-- 分頁顯示（每頁 25 行）
-- 按任意欄搜尋/篩選
-- 拖動欄進行重新排序
-- 點擊多行進行選擇
-- 複製資料到剪貼板
-
-### 📈 圖表分析
-
-- 自動檢測數字欄位
-- 按文字分組統計（Top 15）
-- 數值分佈直方圖
-- 所有圖表都是互動式的
-
-### 📋 統計資訊
-
-- 工作表清單
-- 行列統計
-- 欄位詳情（非空值、唯一值等）
-- 支持複製原始 JSON
 
 ## 常見問題
 
@@ -109,17 +76,6 @@ A: 可以，但需要網際網路連接下載 CDN 資源（表格、圖表庫等
 
 **Q: 在什麼瀏覽器上工作？**  
 A: 所有現代瀏覽器都支持（Chrome、Firefox、Safari、Edge）
-
-## 提升建議
-
-未來可以添加的功能：
-
-- [ ] 資料匯出（CSV、JSON、PDF）
-- [ ] 數據透視表功能
-- [ ] 公式和計算欄
-- [ ] 更多圖表類型
-- [ ] 資料驗證和清理工具
-- [ ] 暗黑模式
 
 ## 許可證
 
